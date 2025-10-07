@@ -7,6 +7,7 @@ import json
 import socket
 import smtplib
 from email.message import EmailMessage
+from email.utils import formataddr
 
 # A function to read JSON File
 # Return List of Nameservers, List of Domains to Check, and Email Settings
@@ -46,6 +47,7 @@ def TestDNS(nameserver, fqdn):
 
 def SendEmail(email, subject, body):
     try:
+        sender_name = email.get("from_name", "")  # optional display name
         senderFrom = email.get("from")
         recipientTo = email.get("to")
         host = email.get("host")
@@ -55,7 +57,12 @@ def SendEmail(email, subject, body):
         password = email.get("password", "") or ""
 
         msg = EmailMessage()
-        msg["From"] = senderFrom
+        # attach display name if provided
+        if sender_name:
+            msg["From"] = formataddr((sender_name, senderFrom))
+        else:
+            msg["From"] = senderFrom
+
         msg["To"] = recipientTo
         msg["Subject"] = subject
         msg.set_content(body, subtype="html")
@@ -82,8 +89,12 @@ def SendEmail(email, subject, body):
 def main():
     nameservers, fqdns, email = ReadJson()
 
-    company = "Example"
-    subject = f"[SUCCESS] - {company} - DNS Server Check Pass"
+    company = email.get("from_name", "")
+
+    if company in (None, ""):
+        subject = "[SUCCESS] - DNS Server Check Pass"
+    else:
+        subject = f"[SUCCESS] - {company} - DNS Server Check Pass"
 
     if nameservers in (None, [], {}):
         return True
