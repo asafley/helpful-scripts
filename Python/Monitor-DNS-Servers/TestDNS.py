@@ -73,7 +73,8 @@ def SendEmail(email, subject, body):
                 server.send_message(msg)
 
         return False
-    except Exception:
+    except Exception as ex:
+        print(f"Error sending email - {ex}")
         return True
 
 # The main function as script is to be ran as a program
@@ -132,7 +133,8 @@ def main():
     html += "</table></body></html>"
 
     # Send the HTML table via email
-    SendEmail(email, subject, html)
+    if SendEmail(email, subject, html):
+        return True
     
     return False
 
