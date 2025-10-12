@@ -116,8 +116,11 @@ def ReadJson(filepath="config.json"):
     nameservers = data.get("nameservers", [])
     domains = data.get("domains", [])
     email = data.get("email", {})
+    
+    # General Options
+    settings = data.get("general", {})
 
-    return nameservers, domains, email
+    return nameservers, domains, email, settings
 
 # A function that will test if a DNS Server is properly working
 # Return False for no errors
@@ -180,7 +183,7 @@ def SendEmail(email, subject, body):
 # The main function as script is to be ran as a program
 # Return False/0 for successful run
 def main():
-    nameservers, fqdns, email = ReadJson(JSON_PATH)
+    nameservers, fqdns, email, settings = ReadJson(JSON_PATH)
 
     # Initialize the database
     InitDB()
@@ -223,10 +226,16 @@ def main():
         
         results.append(result)
     
+    # Save the results to the SQLite Datbase
     if fail:
+        # Finalize the run with a fail
+        Log("Finalizing the failed run in database")
         FinalizeRun(run_id, "FAIL")
+        # Change the subject for the email
         subject = f"[FAIL] - {company} - DNS Server Check"
     else:
+        # Finalize the run with a pass
+        Log("Finalizing the successful run in database")
         FinalizeRun(run_id, "PASS")
 
     # Build styled HTML table summarizing DNS check results
@@ -250,8 +259,24 @@ def main():
 
     html += "</table></body></html>"
 
+    # Check if the results failed
+    if fail:
+        # If Failed check if not sending fail emails
+        if not settings.get("send_fail", True):
+            Log("Skip sending a fail email")
+            # Exit with 0
+            return False
+
+    # Check if results passed
+    if not fail: 
+        if not settings.get("send_pass", True):
+            Log("Skip sending a pass email")
+            return False
+
     # Send the HTML table via email
+    Log("Sending an email")
     if SendEmail(email, subject, html):
+        Log("Failed to send an email")
         return True
     
     return False

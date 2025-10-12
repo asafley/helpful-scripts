@@ -18,5 +18,10 @@
     "password": "",
     "from": "dnscheck@example.com",
     "to": "check@example.com"
+  },
+    "general": {
+    "send_pass": false,
+    "send_fail": true,
+    "digest_minutes": 60
   }
 }
