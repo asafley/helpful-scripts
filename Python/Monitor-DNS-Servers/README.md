@@ -109,6 +109,7 @@ Scheduling
 Security Notes
 
 - If SMTP auth is required, set `username` and `password`. Prefer storing config with appropriate file permissions.
+- Would recommend using SMTP Relay when working with Google Workspace or Microsoft 365/Exchange Online
 - When `ssl` is false, STARTTLS is used. Ensure your SMTP server supports it.
 
 Troubleshooting
