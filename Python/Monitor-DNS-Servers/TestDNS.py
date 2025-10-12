@@ -48,6 +48,7 @@ def InitDB():
             fqdn TEXT NOT NULL,
             nameserver TEXT NOT NULL,
             result TEXT NOT NULL,
+            perf REAL NOT NULL,
             FOREIGN KEY(run_id) REFERENCES runs(id)
         )
     """)
@@ -73,14 +74,14 @@ def StartRun():
     return run_id
 
 # A function to save the results
-def SaveResult(run_id, fqdn, nameserver, result):
+def SaveResult(run_id, fqdn, nameserver, result, perf):
     conn = sqlite3.connect(DB_PATH)
 
     c = conn.cursor()
 
     c.execute(
-        "INSERT INTO results (run_id, fqdn, nameserver, result) VALUES (?, ?, ?, ?)",
-        (run_id, fqdn, nameserver, result)
+        "INSERT INTO results (run_id, fqdn, nameserver, result, perf) VALUES (?, ?, ?, ?, ?)",
+        (run_id, fqdn, nameserver, result, perf)
     )
 
     conn.commit()
@@ -124,7 +125,7 @@ def ReadJson(filepath="config.json"):
     return nameservers, domains, email, settings
 
 # A function that will test if a DNS Server is properly working
-# Return False for no errors
+# Return non-negative for no errors
 def TestDNS(nameserver, fqdn):
     try:
         family = socket.AF_INET6 if ':' in nameserver else socket.AF_INET
@@ -133,18 +134,21 @@ def TestDNS(nameserver, fqdn):
             s.settimeout(3)
             s.connect((nameserver, 53))
 
+        start = datetime.now()
         socket.getaddrinfo(fqdn, None, family)
+        end = datetime.now()
+        duration = round((end - start).total_seconds() * 1000, 3)
 
-        Log(f"Successfully query {fqdn} with server {nameserver}")
+        Log(f"Successfully queried {fqdn} with server {nameserver} in {duration} ms")
 
-        return False
+        return duration
     except Exception as ex:
         Log(f"Failed to query {fqdn} with server {nameserver}")
-        return True
+        return 0.0
 
 def SendEmail(email, subject, body):
     try:
-        sender_name = email.get("from_name", "")  # optional display name
+        sender_name = email.get("from_name", "")
         senderFrom = email.get("from")
         recipientTo = email.get("to")
         host = email.get("host")
@@ -211,6 +215,10 @@ def SendDigestSummary(db_path, email, company, digest_minutes):
     c.execute(f"SELECT COUNT(*) FROM results WHERE run_id IN ({placeholders}) AND result = 'FAIL'", run_ids)
     total_failures = c.fetchone()[0]
 
+    # Overall average resolution time
+    c.execute(f"SELECT ROUND(AVG(perf), 2) FROM results WHERE run_id IN ({placeholders}) AND perf > 0", run_ids)
+    avg_perf = c.fetchone()[0] or 0.0
+
     c.execute(f"""
         SELECT fqdn, 
                SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS pass_count,
@@ -222,6 +230,24 @@ def SendDigestSummary(db_path, email, company, digest_minutes):
         LIMIT 10
     """, run_ids)
     fqdn_rows = c.fetchall()
+
+    c.execute(f"""
+        SELECT fqdn, ROUND(AVG(perf), 2) as avg_perf
+        FROM results
+        WHERE run_id IN ({placeholders}) AND perf > 0
+        GROUP BY fqdn
+        ORDER BY avg_perf DESC
+    """, run_ids)
+    perf_fqdn_rows = c.fetchall()
+
+    c.execute(f"""
+        SELECT nameserver, ROUND(AVG(perf), 2) as avg_perf
+        FROM results
+        WHERE run_id IN ({placeholders}) AND perf > 0
+        GROUP BY nameserver
+        ORDER BY avg_perf DESC
+    """, run_ids)
+    perf_ns_rows = c.fetchall()
 
     conn.close()
 
@@ -252,13 +278,30 @@ def SendDigestSummary(db_path, email, company, digest_minutes):
     html += f"<li>Failed Runs: {fail_count}</li>"
     html += f"<li>Total Queries: {total_queries}</li>"
     html += f"<li>Failures Detected: {total_failures}</li>"
+    html += f"<li>Average Resolution Time: {avg_perf} ms</li>"
     html += "</ul>"
 
+    # Quantitative Measurements of pass/fail
     html += "<h3>Top Failing Domains</h3>"
     html += "<table border='1' cellpadding='5' cellspacing='0'><tr><th>FQDN</th><th>Passes</th><th>Fails</th></tr>"
     for fqdn, passes, fails in fqdn_rows:
         html += f"<tr><td>{fqdn}</td><td>{passes}</td><td>{fails}</td></tr>"
     html += "</table></body></html>"
+
+    # Average performance per FQDN
+    html += "<h3>Average Resolution Time per FQDN</h3>"
+    html += "<table border='1' cellpadding='5' cellspacing='0'><tr><th>FQDN</th><th>Avg Time (ms)</th></tr>"
+    for fqdn, avg in perf_fqdn_rows:
+        html += f"<tr><td>{fqdn}</td><td>{avg}</td></tr>"
+    html += "</table>"
+
+    # Average performance per Nameserver
+    html += "<h3>Average Resolution Time per Nameserver</h3>"
+    html += "<table border='1' cellpadding='5' cellspacing='0'><tr><th>Nameserver</th><th>Avg Time (ms)</th></tr>"
+    for ns, avg in perf_ns_rows:
+        html += f"<tr><td>{ns}</td><td>{avg}</td></tr>"
+    html += "</table>"
+
 
     subject = f"[Digest] DNS Summary - {company} - Last {digest_value} {digest_unit}"
 
@@ -300,15 +343,15 @@ def main():
         }
 
         for nameserver in nameservers:
-            result[nameserver] = "PASS"
+            result[nameserver] = TestDNS(nameserver, fqdn)
 
-            if TestDNS(nameserver, fqdn):
-                SaveResult(run_id, fqdn, nameserver, "FAIL")
+            if result[nameserver] <= 0:
+                SaveResult(run_id, fqdn, nameserver, "FAIL", 0)
                 fail = True
                 result["overall"] = "FAIL"
-                result[nameserver] = "FAIL"
+                result[nameserver] = 0.0
             else:
-                SaveResult(run_id, fqdn, nameserver, "PASS")
+                SaveResult(run_id, fqdn, nameserver, "PASS", result[nameserver])
         
         results.append(result)
     
@@ -339,9 +382,9 @@ def main():
         html += f"<tr><td>{result['name']}</td><td style='background-color:{overall_color}'>{result['overall']}</td>"
 
         for nameserver in nameservers:
-            status = result.get(nameserver, "")
-            color = "#ccffcc" if status == "PASS" else "#ffcccc"
-            html += f"<td style='background-color:{color}'>{status}</td>"
+            status = result.get(nameserver, 0)
+            color = "#ccffcc" if status > 0 else "#ffcccc"
+            html += f"<td style='background-color:{color}'>{status} ms</td>"
 
         html += "</tr>"
 
