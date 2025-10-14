@@ -169,10 +169,6 @@ def CheckIPInfo(ip, ttl=7):
 
 # Function to geolocate an IP address using MaxMind
 def GeolocateIP(ip, maxmind_config=None):
-    # Placeholder function to geolocate an IP address
-    # This function should interact with the MaxMind database or API
-    # and return the geolocation data for the given IP address.
-
     # Check if MaxMind config is provided
     if maxmind_config is None:
         Log("MaxMind configuration is missing!")
