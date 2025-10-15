@@ -9,6 +9,42 @@ import json
 import ipaddress
 import requests
 
+# Module defaults for import-friendly usage
+LOG_PATH = os.environ.get("GEO_LOG_PATH", "geo.log")
+CONFIG_PATH = os.environ.get("GEO_CONFIG_PATH", "config.json")
+DB_PATH = os.environ.get("GEO_DB_PATH", "geo.db")
+
+# Exceptions
+class GeoError(Exception):
+    pass
+
+class ConfigError(GeoError):
+    pass
+
+class DatabaseError(GeoError):
+    pass
+
+class GeolocationError(GeoError):
+    pass
+
+class InvalidIPError(GeoError):
+    pass
+
+__all__ = [
+    "get_ip_info",
+    "ReadConfig",
+    "InitDatabase",
+    "SaveIPInfo",
+    "CheckIPInfo",
+    "GeolocateIP",
+    "Log",
+    "GeoError",
+    "ConfigError",
+    "DatabaseError",
+    "GeolocationError",
+    "InvalidIPError",
+]
+
 # Function to log messages to a file with timestamp
 def Log(message, tee=True):
     # Generate the timestamp
@@ -132,7 +168,7 @@ def SaveIPInfo(filepath="geo.db", ipinfo=None):
     return False
 
 # Function to check if IP information is already in the database and see if still valid
-def CheckIPInfo(ip, ttl=7):
+def CheckIPInfo(ip, ttl=7, filepath=None):
     # Check if IP is "me", if so return None
     if ip == "me":
         Log(f"IP is 'me', skipping database check")
@@ -142,7 +178,8 @@ def CheckIPInfo(ip, ttl=7):
     Log(f"Checking IP info for: {ip}")
 
     # Open the database connection
-    conn = sqlite3.connect(DB_PATH)
+    db_path = filepath or DB_PATH
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     # Query the database for the IP address
@@ -286,6 +323,47 @@ def GeolocateIP(ip, maxmind_config=None):
     
     # Log the remaining queries available
     Log(f"MaxMind remaining queries: {maxmind.get('queries_remaining', 'N/A')}")
+
+    return ipinfo
+
+# High-level import-friendly API
+# Returns IP info dict; raises exceptions on errors
+def get_ip_info(ip="me", *, config_path=None, db_path=None, force=False, ttl=None):
+    cfg_path = config_path or CONFIG_PATH
+    dbp = db_path or DB_PATH
+
+    # Validate IP
+    if ip != "me":
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError as e:
+            raise InvalidIPError(f"Invalid IP address: {ip}") from e
+
+    # Read config
+    general, maxmind = ReadConfig(cfg_path)
+    if general is None or maxmind is None:
+        raise ConfigError(f"Failed to read configuration from {cfg_path}")
+
+    edition = maxmind.get("edition")
+    editions = maxmind.get("editions", {})
+    if edition not in editions:
+        raise ConfigError(f"Invalid MaxMind edition: {edition}")
+
+    # Ensure DB exists
+    InitDatabase(dbp)
+
+    # Use cached value unless forcing
+    ttl_days = ttl if ttl is not None else general.get("ttl", 7)
+    ipinfo = None if force else CheckIPInfo(ip, ttl_days, filepath=dbp)
+
+    # Fetch and persist if needed
+    if ipinfo in [None, {}]:
+        ipinfo = GeolocateIP(ip, maxmind)
+        if not ipinfo:
+            raise GeolocationError(f"Failed to geolocate IP address: {ip}")
+        if SaveIPInfo(dbp, ipinfo):
+            raise DatabaseError(f"Failed to save IP info to database: {dbp}")
+
 
     return ipinfo
 
