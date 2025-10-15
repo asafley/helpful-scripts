@@ -1,3 +1,4 @@
 *.json
 *.db
 *.log
+__pycache__/
