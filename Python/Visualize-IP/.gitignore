@@ -1,0 +1,6 @@
+*.log
+*.db
+*.json
+*.csv
+*.png
+__pycache__/
