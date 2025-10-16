@@ -13,7 +13,7 @@ $syncList = @(
 
 # Define robocopy parameters (correctly formatted)
 # Exclude some well known folders; add more within double quotation
-$ExcludedDirs = '"$RECYCLE.BIN" "System Volume Information" "#recycle"' # Proper quoting for all
+$ExcludedDirs = @('$RECYCLE.BIN','System Volume Information','#recycle') # Excluded dir names as array
 
 # Define robocopy parameters
 # Some helpful arguments for robocopy
